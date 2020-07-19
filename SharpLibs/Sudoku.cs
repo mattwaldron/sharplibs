@@ -12,23 +12,23 @@ namespace Sudoku
         public int Column { get; set; }
         public int Block => ((Row / 3) + ((Column / 3) * 3));
         private int? _value;
-        public int Value => _value.Value;
+        public int Value => _value ?? 0;
+
         public bool HasValue => _value.HasValue;
-        public void SetValue(int value, IEnumerable<SudokuSquare> board = null)
+        public void SetValue(int value)
         {
             _value = value;
-            Exclusions = SudokuIterators.OneToNine.Where(v => v != _value).ToList();
+            _options.Clear();
         }
 
-        public void Exclude(int value)
+        public void Forbid(int value)
         {
-            if (!Exclusions.Contains(value))
-            {
-                Exclusions.Add(value);
-            }
+            _options.Remove(value);
         }
 
-        public List<int> Exclusions = new List<int>();
+        private readonly List<int> _options = SudokuIterators.PossibleValues.ToList();
+        public int NumOptions => _options.Count();
+        public IReadOnlyList<int> Options => _options;
 
         public bool IsRelatedTo(SudokuSquare s) =>
                Row == s.Row
@@ -44,9 +44,9 @@ namespace Sudoku
         {
             board = new SudokuSquare[9, 9];
 
-            foreach (var r in SudokuIterators.ZeroToEight)
+            foreach (var r in SudokuIterators.Indexes)
             {
-                foreach (var c in SudokuIterators.ZeroToEight)
+                foreach (var c in SudokuIterators.Indexes)
                 {
                     board[r, c] = new SudokuSquare { Row = r, Column = c };
                 }
@@ -60,7 +60,7 @@ namespace Sudoku
             s.SetValue(value);
             foreach (var ss in AllRelated(s))
             {
-                ss.Exclude(value);
+                ss.Forbid(value);
             }
         }
 
@@ -68,9 +68,9 @@ namespace Sudoku
         {
             get
             {
-                foreach (var r in SudokuIterators.ZeroToEight)
+                foreach (var r in SudokuIterators.Indexes)
                 {
-                    foreach (var c in SudokuIterators.ZeroToEight)
+                    foreach (var c in SudokuIterators.Indexes)
                     {
                         yield return board[r, c];
                     }
@@ -106,7 +106,7 @@ namespace Sudoku
 
         public IEnumerable<SudokuSquare> GetRow(int r)
         {
-            foreach (var c in SudokuIterators.ZeroToEight)
+            foreach (var c in SudokuIterators.Indexes)
             {
                 yield return board[r, c];
             }
@@ -114,7 +114,7 @@ namespace Sudoku
 
         public IEnumerable<SudokuSquare> GetColumn(int c)
         {
-            foreach (var r in SudokuIterators.ZeroToEight)
+            foreach (var r in SudokuIterators.Indexes)
             {
                 yield return board[r, c];
             }
@@ -122,9 +122,9 @@ namespace Sudoku
 
         public IEnumerable<SudokuSquare> GetBlock(int b)
         {
-            foreach (var r in SudokuIterators.ZeroToEight)
+            foreach (var r in SudokuIterators.Indexes)
             {
-                foreach (var c in SudokuIterators.ZeroToEight)
+                foreach (var c in SudokuIterators.Indexes)
                 {
                     var s = board[r, c];
                     if (s.Block == b)
@@ -166,36 +166,75 @@ namespace Sudoku
         public IEnumerable<SudokuSquare> AllRelated(SudokuSquare square) =>
             Squares.Where(square.IsRelatedTo);
         public IEnumerable<IEnumerable<SudokuSquare>> EnumerateRows() =>
-            SudokuIterators.ZeroToEight.Select(GetRow);
+            SudokuIterators.Indexes.Select(GetRow);
         public IEnumerable<IEnumerable<SudokuSquare>> EnumerateColumns() =>
-            SudokuIterators.ZeroToEight.Select(GetColumn);
+            SudokuIterators.Indexes.Select(GetColumn);
         public IEnumerable<IEnumerable<SudokuSquare>> EnumerateBlocks() =>
-            SudokuIterators.ZeroToEight.Select(GetBlock);
+            SudokuIterators.Indexes.Select(GetBlock);
     }
 
     public static class SudokuIterators
     {
-        public static IEnumerable<int> ZeroToEight => Enumerable.Range(0, 9);
-        public static IEnumerable<int> OneToNine => Enumerable.Range(1, 9);
-       
+        public static IEnumerable<int> Indexes => Enumerable.Range(0, 9);
+        public static IEnumerable<int> PossibleValues => Enumerable.Range(1, 9);
+
+        public static IEnumerable<int> FoundValues(this IEnumerable<SudokuSquare> squares) =>
+            squares.Where(s => s.HasValue).Select(s => s.Value).ToList();
+
+        public static IEnumerable<int> UnfoundOptions(this IEnumerable<SudokuSquare> squares) =>
+            PossibleValues.Except(squares.FoundValues()).ToList();
+
     }
 
     public static class SudokuAlgorithms
     {
-        public static bool TrySquareExclusions(this SudokuBoard b, out SudokuSquare newlySolved)
+        public static IEnumerable<SudokuBoard> IterateAllAlgorithms(this SudokuBoard b)
+        {
+            while (true)
+            {
+                SudokuSquare s;
+                if (b.SquareHasOneOption(out s))
+                {
+                    yield return b;
+                    continue;
+                }
+                if (b.GroupHasOneSquareWithOption(out s))
+                {
+                    yield return b;
+                    continue;
+                }
+
+                if (b.RestrictOptionsInGroupCommonToOtherGroup())
+                {
+                    yield return b;
+                    continue;
+                }
+                if (b.RemoveOptionsFromUnboundSquares())
+                {
+                    yield return b;
+                    continue;
+                }
+
+                break;
+            }
+        }
+        
+        /// <summary>
+        /// Set the values for the first square that has its options reduced to 1.
+        /// </summary>
+        public static bool SquareHasOneOption(this SudokuBoard board, out SudokuSquare newlySolved)
         {
             newlySolved = null;
-            foreach (var s in b.Squares)
+            foreach (var s in board.Squares)
             {
                 if (s.HasValue)
                 {
                     continue;
                 }
 
-                if (s.Exclusions.Count == 8)
+                if (s.NumOptions == 1)
                 {
-                    var value = SudokuIterators.OneToNine.Except(s.Exclusions).Single();
-                    b.SetValue(s, value);
+                    board.SetValue(s, s.Options.Single());
                     newlySolved = s;
                     return true;
                 }
@@ -203,43 +242,196 @@ namespace Sudoku
             return false;
         }
 
-        private static SudokuSquare OnlyWithoutExclusion(IEnumerable<SudokuSquare> squares, SudokuBoard board)
-        {
-            var squareList = squares.ToList();
-            var emptyList = squares.Where(s => !s.HasValue).ToList();
-            var remaining =
-                SudokuIterators.OneToNine.Except(squareList.Where(s => s.HasValue).Select(s => s.Value));
-            foreach (var r in remaining)
-            {
-                if (emptyList.Count(e => e.Exclusions.Contains(r)) == emptyList.Count - 1)
-                {
-                    var sq = emptyList.Single(e => !e.Exclusions.Contains(r));
-                    board.SetValue(sq, r);
-                    return sq;
-                }
-            }
-
-            return null;
-        }
-
-        public static bool TryOnlyWithoutExclusion(this SudokuBoard b, out SudokuSquare newlyFound)
+        /// <summary>
+        /// If all squares in a group (row, column, block) but one exclude the same value, then the square without the
+        /// exclusion must be that value. 
+        /// </summary>
+        public static bool GroupHasOneSquareWithOption(this SudokuBoard board, out SudokuSquare newlyFound)
         {
             newlyFound = null;
 
-            foreach (var enumerator in new[] {b.EnumerateRows(), b.EnumerateColumns(), b.EnumerateBlocks()})
+            foreach (var enumerator in new[] {board.EnumerateRows(), board.EnumerateColumns(), board.EnumerateBlocks()})
             {
-                foreach (var set in enumerator)
+                foreach (var group in enumerator)
                 {
-                    var sq = OnlyWithoutExclusion(set, b);
-                    if (sq != null)
+                    var unsetSquares = group.Where(s => !s.HasValue).ToList();
+                    var unsetValues = group.UnfoundOptions();
+                    foreach (var v in unsetValues)
                     {
-                        newlyFound = sq;
-                        return true;
+                        if (unsetSquares.Count(e => e.Options.Contains(v)) == 1)
+                        {
+                            newlyFound = unsetSquares.Single(e => e.Options.Contains(v));
+                            board.SetValue(newlyFound, v);
+                            return true;
+                        }
                     }
                 }
             }
 
             return false;
         }
+
+        /// <summary>
+        /// In this check, we search for options in a group that are also common to another group, and remove options
+        /// from the second group not in the first.  For example, given a row, if all options for a value are in the same
+        /// block, then options for that value in the block not in the given row can be removed.
+        /// </summary>
+        public static bool RestrictOptionsInGroupCommonToOtherGroup(this SudokuBoard board)
+        {
+            // There are four cases to check:
+            // - rows with options in the same block
+            // - columns with options in the same block
+            // - blocks with options in the same row
+            // - blocks with options in the same rows
+            // Rows with options in the same column and vice versa should be caught as the only option
+            // in a square, since the overlap between a row and a column is a single square.
+
+            // TODO: Make the procedure here common with variable enumerators.
+            // rows with options in the same block:
+            foreach (var group in board.EnumerateRows())
+            {
+                var row = group.First().Row;
+                foreach (var option in group.UnfoundOptions())
+                {
+                    var squaresWithOption = group.Where(s => s.Options.Contains(option));
+                    if (squaresWithOption.Select(s => s.Block).Distinct().Count() == 1)
+                    {
+                        var block = squaresWithOption.First().Block;
+                        foreach (var s in board.GetBlock(block).Where(s => s.Row != row && !s.HasValue && s.Options.Contains(option)))
+                        {
+                            s.Forbid(option);
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            // columns with options in the same block:
+            foreach (var group in board.EnumerateColumns())
+            {
+                var column = group.First().Column;
+                foreach (var option in group.UnfoundOptions())
+                {
+                    var squaresWithOption = group.Where(s => s.Options.Contains(option));
+                    if (squaresWithOption.Select(s => s.Block).Distinct().Count() == 1)
+                    {
+                        var block = squaresWithOption.First().Block;
+                        foreach (var s in board.GetBlock(block).Where(s => s.Column != column && !s.HasValue && s.Options.Contains(option)))
+                        {
+                            s.Forbid(option);
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            // blocks with options in the same row
+            foreach (var group in board.EnumerateBlocks())
+            {
+                var block = group.First().Block;
+                foreach (var option in group.UnfoundOptions())
+                {
+                    var squaresWithOption = group.Where(s => s.Options.Contains(option));
+                    if (squaresWithOption.Select(s => s.Row).Distinct().Count() == 1)
+                    {
+                        var row = squaresWithOption.First().Row;
+                        foreach (var s in board.GetRow(row).Where(s => s.Block != block && !s.HasValue && s.Options.Contains(option)))
+                        {
+                            s.Forbid(option);
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            // blocks with options in the same row
+            foreach (var group in board.EnumerateBlocks())
+            {
+                var block = group.First().Block;
+                foreach (var option in group.UnfoundOptions())
+                {
+                    var squaresWithOption = group.Where(s => s.Options.Contains(option));
+                    if (squaresWithOption.Select(s => s.Column).Distinct().Count() == 1)
+                    {
+                        var column = squaresWithOption.First().Column;
+                        foreach (var s in board.GetColumn(column).Where(s => s.Block != block && !s.HasValue && s.Options.Contains(option)))
+                        {
+                            s.Forbid(option);
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        public static bool RemoveUnboundOptions(IEnumerable<SudokuSquare> squares, int nvals)
+        {
+            var optionsRemoved = false;
+            var possibleBinds = squares.Where(s => !s.HasValue && s.NumOptions == nvals).ToList();
+            if (possibleBinds.Count >= nvals)
+            {
+                for (var i = 0; i < possibleBinds.Count; i++)
+                {
+                    var unboundSquares = squares.Where(s => !s.HasValue).ToList(); // un-set squares with the constraint squares removed
+                    var boundSquares = new List<SudokuSquare> {possibleBinds[i]};
+                    var bindingOptions = boundSquares.First().Options;
+                    unboundSquares.Remove(possibleBinds[i]);
+                    for (var j = i + 1; j < possibleBinds.Count; j++)
+                    {
+                        if (bindingOptions.Count == possibleBinds[j].Options.Count && bindingOptions.All(possibleBinds[j].Options.Contains))
+                        {
+                            boundSquares.Add(possibleBinds[j]);
+                            unboundSquares.Remove(possibleBinds[j]);
+                        }
+                    }
+
+                    if (boundSquares.Count == nvals)
+                    {
+                        foreach (var s in unboundSquares)
+                        {
+                            if (bindingOptions.Intersect(s.Options).Any())
+                            {
+                                foreach (var e in bindingOptions)
+                                {
+                                    s.Forbid(e);
+                                }
+
+                                optionsRemoved = true;
+                            }
+                        }
+                    }
+                }
+            }
+
+            return optionsRemoved;
+        }
+
+        /// <summary>
+        /// Here we define 'bound' squares as those with the same options.  They are bound because (in the case of two) defining
+        /// one value defines the value of the other.  Therefore, other squares in the group cannot be either of the options in
+        /// the binding; e.g.: if squares have options {1, 5}, {1, 5}, {2, 4, 5}, {2, 4}.  The 5 in {2, 4, 5} can be removed
+        /// because the 5 must be in either of the {1, 5} squares.
+        /// </summary>
+        public static bool RemoveOptionsFromUnboundSquares(this SudokuBoard b)
+        {
+            foreach (var enumerator in new[] {b.EnumerateRows(), b.EnumerateColumns(), b.EnumerateBlocks()})
+            {
+                foreach (var set in enumerator)
+                {
+                    for (var n = 2; n <= set.Count(s => !s.HasValue); n++)
+                    {
+                        if (RemoveUnboundOptions(set, n))
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            return false;
+        }
+
     }
 }
