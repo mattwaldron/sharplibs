@@ -3,9 +3,9 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using NUnit.Framework;
-using Sudoku;
+using SharpLibs.Sudoku;
 
-namespace SudokuTest
+namespace SharpLibsTests
 {
     public class SudokuTestHelp
     {
@@ -99,6 +99,26 @@ namespace SudokuTest
             var set = board.GetBlock(5);
             SudokuAlgorithms.RemoveUnboundOptions(set, 2);
             Assert.AreEqual(2, board[6, 5].NumOptions);
+        }
+
+        [Test]
+        public void ReduceExtraOptionsFromBoundSquares_ExamplePuzzle()
+        {
+            var board = SudokuTestHelp.LoadBoardFromText(
+                @"
+.3978.1.5
+1..95.3..
+...13.8.9
+...82..3.
+3..46...8
+.2.371..4
+7.3648...
+..62974.3
+2.45137.6
+");
+            board.RemoveExtraOptionsFromBoundSquares();
+            Assert.AreEqual(2, board[4, 7].NumOptions);
+
         }
 
         [Test]
@@ -229,6 +249,78 @@ namespace SudokuTest
 ..3......
 ..936.5..
 .6.2....4
+");
+            foreach (var b in board.IterateAllAlgorithms())
+            {
+                Debug.Write(board.ToString());
+                Debug.WriteLine("");
+            }
+
+            Assert.IsTrue(board.IsValidComplete);
+        }
+
+        [Test]
+        public void Solve_NewspaperSixStarPuzzle()
+        {
+            var board = SudokuTestHelp.LoadBoardFromText(
+@"
+..9.8.1.5
+1..95.3..
+......8.9
+...82..3.
+3...6...8
+.2..71...
+7.3......
+..6.97..3
+2.4.1.7..
+");
+            foreach (var b in board.IterateAllAlgorithms())
+            {
+                Debug.Write(board.ToString());
+                Debug.WriteLine("");
+            }
+
+            Assert.IsTrue(board.IsValidComplete);
+        }
+
+        [Test]
+        public void Solve_FiveStar20190510()
+        {
+            var board = SudokuTestHelp.LoadBoardFromText(
+@"
+.....9.43
+....3.6..
+5...6.78.
+.1.....52
+...6.8...
+84.....1.
+.56.7...8
+..1.9....
+78.5.....
+");
+            foreach (var b in board.IterateAllAlgorithms())
+            {
+                Debug.Write(board.ToString());
+                Debug.WriteLine("");
+            }
+
+            Assert.IsTrue(board.IsValidComplete);
+        }
+
+        [Test]
+        public void Solve_SixStar20200802()
+        {
+            var board = SudokuTestHelp.LoadBoardFromText(
+                @"
+.....563.
+.6.413..7
+..7.6.1..
+2.5......
+.1..5..7.
+......4.8
+..6.8.2..
+4..726.8.
+.215.....
 ");
             foreach (var b in board.IterateAllAlgorithms())
             {
